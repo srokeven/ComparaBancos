@@ -47,24 +47,50 @@ object dmConexao: TdmConexao
       item
         Name = 'CAMPOS'
         SQL.Strings = (
+          'select DISTINCT'
+          '       RF.RDB$FIELD_NAME FIELD_NAME,'
+          '       case RF.RDB$NULL_FLAG'
+          '         when 1 then 1'
+          '         else 0'
+          '       end as NOT_NULL,'
           
-            'select RF.RDB$FIELD_NAME FIELD_NAME, case RF.RDB$NULL_FLAG when ' +
-            '1 then 1 else 0 end as NOT_NULL, coalesce(replace(RF.RDB$DEFAULT' +
-            '_SOURCE, '#39'DEFAULT '#39', '#39#39'),'#39#39') as DEFAULT_VALUE, F.RDB$FIELD_LENGT' +
-            'H FIELD_LENGTH, coalesce(F.RDB$FIELD_PRECISION, '#39#39')as FIELD_PREC' +
-            'ISION, abs(F.RDB$FIELD_SCALE) as FIELD_SCALE, case F.RDB$FIELD_T' +
-            'YPE when  261 then '#39'BLOB'#39' when 14 then '#39'CHAR'#39' when 40 then '#39'VARC' +
-            'HAR'#39' when 11 then '#39'FLOAT'#39' when 27 then '#39'DOUBLE'#39' when 10 then '#39'FL' +
-            'OAT'#39' when 16 then iif(F.RDB$FIELD_PRECISION = 0, '#39'INT64'#39', iif(F.' +
-            'RDB$FIELD_SUB_TYPE = 1, '#39'NUMERIC'#39', '#39'DECIMAL'#39')) when 8 then iif(F' +
-            '.RDB$FIELD_PRECISION = 0, '#39'INTEGER'#39', '#39'DECIMAL'#39') when 7 then '#39'SMA' +
-            'LLINT'#39' when 12 then '#39'DATE'#39' when 13 then '#39'TIME'#39' when 35 then '#39'TIM' +
-            'ESTAMP'#39' when 37 then '#39'VARCHAR'#39' else '#39'UNKNOWN'#39' end as FIELD_TYPE,' +
-            ' coalesce(F.RDB$FIELD_SUB_TYPE,'#39#39')  FIELD_SUB_TYPE, coalesce(F.R' +
-            'DB$SEGMENT_LENGTH,'#39#39') SEGMENT_LENGTH from RDB$RELATION_FIELDS RF' +
-            ' join RDB$FIELDS F on  RF.RDB$FIELD_SOURCE = F.RDB$FIELD_NAME wh' +
-            'ere RF.RDB$RELATION_NAME = '#39'$TABELA'#39' order by RF.RDB$FIELD_NAME ' +
-            'asc ')
+            '       coalesce(replace(RF.RDB$DEFAULT_SOURCE, '#39'DEFAULT '#39', '#39#39'), ' +
+            #39#39') as DEFAULT_VALUE,'
+          '       F.RDB$FIELD_LENGTH FIELD_LENGTH,'
+          '       coalesce(F.RDB$FIELD_PRECISION, '#39#39') as FIELD_PRECISION,'
+          '       abs(F.RDB$FIELD_SCALE) as FIELD_SCALE,'
+          '       case F.RDB$FIELD_TYPE'
+          '         when 261 then '#39'BLOB'#39
+          '         when 14 then '#39'CHAR'#39
+          '         when 40 then '#39'VARCHAR'#39
+          '         when 11 then '#39'FLOAT'#39
+          '         when 27 then '#39'DOUBLE'#39
+          '         when 10 then '#39'FLOAT'#39
+          
+            '         when 16 then iif(F.RDB$FIELD_PRECISION = 0, '#39'INT64'#39', ii' +
+            'f(F.RDB$FIELD_SUB_TYPE = 1, '#39'NUMERIC'#39', '#39'DECIMAL'#39'))'
+          
+            '         when 8 then iif(F.RDB$FIELD_PRECISION = 0, '#39'INTEGER'#39', '#39 +
+            'DECIMAL'#39')'
+          '         when 7 then '#39'SMALLINT'#39
+          '         when 12 then '#39'DATE'#39
+          '         when 13 then '#39'TIME'#39
+          '         when 35 then '#39'TIMESTAMP'#39
+          '         when 37 then '#39'VARCHAR'#39
+          '         else '#39'UNKNOWN'#39
+          '       end as FIELD_TYPE,'
+          '       coalesce(F.RDB$FIELD_SUB_TYPE, '#39'0'#39') FIELD_SUB_TYPE,'
+          '       coalesce(F.RDB$SEGMENT_LENGTH, '#39#39') SEGMENT_LENGTH,'
+          
+            '       coalesce(CSET.RDB$CHARACTER_SET_NAME, '#39#39') as FIELD_CHARSE' +
+            'T'
+          'from RDB$RELATION_FIELDS RF'
+          'join RDB$FIELDS F on RF.RDB$FIELD_SOURCE = F.RDB$FIELD_NAME'
+          
+            'left join RDB$CHARACTER_SETS CSET on F.RDB$CHARACTER_SET_ID = CS' +
+            'ET.RDB$CHARACTER_SET_ID'
+          'where RF.RDB$RELATION_NAME = '#39'$TABELA'#39
+          'order by RF.RDB$FIELD_NAME asc ')
       end
       item
         Name = 'CONSTRAINTS'
@@ -252,6 +278,11 @@ object dmConexao: TdmConexao
         Name = 'SEQUENCE_CRIAR'
         SQL.Strings = (
           'CREATE SEQUENCE $NOME;')
+      end
+      item
+        Name = 'CHECK_VERSAO'
+        SQL.Strings = (
+          'select VERSIONDB from SYSINFO')
       end>
     Connection = ConexaoOrigem
     Params = <>

@@ -3,7 +3,7 @@ object fmMainCamparaBancos: TfmMainCamparaBancos
   Top = 0
   Caption = 'Compara'#231#227'o entre bancos'
   ClientHeight = 418
-  ClientWidth = 699
+  ClientWidth = 910
   Color = clBtnFace
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWindowText
@@ -13,12 +13,13 @@ object fmMainCamparaBancos: TfmMainCamparaBancos
   OldCreateOrder = False
   OnCreate = FormCreate
   OnDestroy = FormDestroy
+  OnResize = FormResize
   PixelsPerInch = 96
   TextHeight = 16
   object pnlBottom: TPanel
     Left = 0
     Top = 362
-    Width = 699
+    Width = 910
     Height = 56
     Align = alBottom
     TabOrder = 0
@@ -46,7 +47,7 @@ object fmMainCamparaBancos: TfmMainCamparaBancos
     object Panel2: TPanel
       Left = 161
       Top = 1
-      Width = 537
+      Width = 748
       Height = 54
       Align = alClient
       BevelInner = bvLowered
@@ -56,7 +57,7 @@ object fmMainCamparaBancos: TfmMainCamparaBancos
         AlignWithMargins = True
         Left = 4
         Top = 4
-        Width = 529
+        Width = 740
         Height = 46
         Align = alClient
         TabOrder = 0
@@ -66,14 +67,14 @@ object fmMainCamparaBancos: TfmMainCamparaBancos
   object pnlBackground: TPanel
     Left = 0
     Top = 0
-    Width = 699
+    Width = 910
     Height = 362
     Align = alClient
     TabOrder = 1
-    object PageControl1: TPageControl
+    object pcPrincipal: TPageControl
       Left = 1
       Top = 1
-      Width = 697
+      Width = 908
       Height = 360
       ActivePage = tsGeral
       Align = alClient
@@ -84,11 +85,14 @@ object fmMainCamparaBancos: TfmMainCamparaBancos
           AlignWithMargins = True
           Left = 3
           Top = 3
-          Width = 337
+          Width = 450
           Height = 323
           Align = alLeft
           Caption = 'Origem'
           TabOrder = 0
+          DesignSize = (
+            450
+            323)
           object Label1: TLabel
             Left = 11
             Top = 24
@@ -127,16 +131,18 @@ object fmMainCamparaBancos: TfmMainCamparaBancos
           object edServerOrigin: TEdit
             Left = 11
             Top = 46
-            Width = 121
+            Width = 418
             Height = 24
+            Anchors = [akLeft, akTop, akRight]
             TabOrder = 0
             Text = '127.0.0.1'
           end
           object edPortOrigin: TEdit
             Left = 11
             Top = 98
-            Width = 55
+            Width = 418
             Height = 24
+            Anchors = [akLeft, akTop, akRight]
             NumbersOnly = True
             TabOrder = 1
             Text = '3055'
@@ -144,24 +150,27 @@ object fmMainCamparaBancos: TfmMainCamparaBancos
           object edDatabaseOrigin: TEdit
             Left = 11
             Top = 150
-            Width = 310
+            Width = 418
             Height = 24
+            Anchors = [akLeft, akTop, akRight]
             TabOrder = 2
             Text = 'D:\Dados\Compare\base\MASTERVENDAS.FDB'
           end
           object edPasswordOrigin: TEdit
             Left = 11
             Top = 254
-            Width = 121
+            Width = 418
             Height = 24
+            Anchors = [akLeft, akTop, akRight]
             TabOrder = 3
             Text = 'masterkey'
           end
           object edUsernameOrigin: TEdit
             Left = 11
             Top = 202
-            Width = 121
+            Width = 418
             Height = 24
+            Anchors = [akLeft, akTop, akRight]
             TabOrder = 4
             Text = 'SYSDBA'
           end
@@ -177,22 +186,34 @@ object fmMainCamparaBancos: TfmMainCamparaBancos
           object btnExtrairMetadadosOrigem: TButton
             Left = 92
             Top = 284
-            Width = 229
+            Width = 149
             Height = 25
             Caption = 'Extrair Metadados'
             TabOrder = 6
             OnClick = btnExtrairMetadadosOrigemClick
           end
+          object btnOrigemSequences: TButton
+            Left = 247
+            Top = 284
+            Width = 182
+            Height = 25
+            Caption = 'Recalcular sequences'
+            TabOrder = 7
+            OnClick = btnOrigemSequencesClick
+          end
         end
         object gbDestino: TGroupBox
           AlignWithMargins = True
-          Left = 349
+          Left = 447
           Top = 3
-          Width = 337
+          Width = 450
           Height = 323
           Align = alRight
           Caption = 'Destino'
           TabOrder = 1
+          DesignSize = (
+            450
+            323)
           object Label6: TLabel
             Left = 11
             Top = 24
@@ -231,16 +252,18 @@ object fmMainCamparaBancos: TfmMainCamparaBancos
           object edServerDest: TEdit
             Left = 11
             Top = 46
-            Width = 121
+            Width = 423
             Height = 24
+            Anchors = [akLeft, akTop, akRight]
             TabOrder = 0
             Text = '127.0.0.1'
           end
           object edPortDest: TEdit
             Left = 11
             Top = 98
-            Width = 55
+            Width = 423
             Height = 24
+            Anchors = [akLeft, akTop, akRight]
             NumbersOnly = True
             TabOrder = 1
             Text = '3055'
@@ -248,24 +271,27 @@ object fmMainCamparaBancos: TfmMainCamparaBancos
           object edDatabaseDest: TEdit
             Left = 11
             Top = 150
-            Width = 310
+            Width = 423
             Height = 24
+            Anchors = [akLeft, akTop, akRight]
             TabOrder = 2
             Text = 'D:\Dados\Compare\Novo\MASTERVENDAS.FDB'
           end
           object edUsernameDest: TEdit
             Left = 11
             Top = 202
-            Width = 121
+            Width = 423
             Height = 24
+            Anchors = [akLeft, akTop, akRight]
             TabOrder = 3
             Text = 'SYSDBA'
           end
           object edPasswordDest: TEdit
             Left = 11
             Top = 254
-            Width = 121
+            Width = 423
             Height = 24
+            Anchors = [akLeft, akTop, akRight]
             TabOrder = 4
             Text = 'masterkey'
           end
@@ -281,11 +307,19 @@ object fmMainCamparaBancos: TfmMainCamparaBancos
           object btnExtrairMetadadosDestino: TButton
             Left = 92
             Top = 284
-            Width = 229
+            Width = 149
             Height = 25
             Caption = 'Extrair Metadados'
             TabOrder = 6
             OnClick = btnExtrairMetadadosDestinoClick
+          end
+          object btnDestinoSequence: TButton
+            Left = 247
+            Top = 284
+            Width = 182
+            Height = 25
+            Caption = 'Recalcular sequences'
+            TabOrder = 7
           end
         end
       end
@@ -295,7 +329,7 @@ object fmMainCamparaBancos: TfmMainCamparaBancos
         object mmResposta: TMemo
           Left = 0
           Top = 0
-          Width = 689
+          Width = 900
           Height = 329
           Align = alClient
           TabOrder = 0
@@ -307,7 +341,7 @@ object fmMainCamparaBancos: TfmMainCamparaBancos
         object mmComparativo: TMemo
           Left = 0
           Top = 0
-          Width = 689
+          Width = 900
           Height = 329
           Align = alClient
           TabOrder = 0

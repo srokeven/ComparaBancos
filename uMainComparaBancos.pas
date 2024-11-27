@@ -5,7 +5,7 @@ interface
 uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls, Vcl.ComCtrls, Vcl.ExtCtrls,
-  uCompareDatabases, System.JSON, System.StrUtils, CamparaBancos.Resposta;
+  uCompareDatabases, System.JSON, System.StrUtils, CamparaBancos.Resposta, System.Threading;
 
 type
   TfmMainCamparaBancos = class(TForm)
@@ -13,7 +13,7 @@ type
     pnlBackground: TPanel;
     gbOrigem: TGroupBox;
     gbDestino: TGroupBox;
-    PageControl1: TPageControl;
+    pcPrincipal: TPageControl;
     tsGeral: TTabSheet;
     tsSchema: TTabSheet;
     Label1: TLabel;
@@ -47,6 +47,8 @@ type
     Panel2: TPanel;
     btnComparar: TButton;
     Progresso: TProgressBar;
+    btnOrigemSequences: TButton;
+    btnDestinoSequence: TButton;
     procedure FormDestroy(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure btnTesteOriginClick(Sender: TObject);
@@ -54,8 +56,13 @@ type
     procedure btnExtrairMetadadosOrigemClick(Sender: TObject);
     procedure btnExtrairMetadadosDestinoClick(Sender: TObject);
     procedure btnCompararClick(Sender: TObject);
+    procedure FormResize(Sender: TObject);
+    procedure btnOrigemSequencesClick(Sender: TObject);
   private
     fComparacao: TCompareDatabase;
+    FProcesso: TProcesso;
+    procedure HandleEscreveProcessoAtual(Sender: TObject);
+    procedure HandleEscreveProcessoFinal(Sender: TObject);
   public
     { Public declarations }
   end;
@@ -71,8 +78,13 @@ procedure TfmMainCamparaBancos.btnCompararClick(Sender: TObject);
 var
   lSchemaOrigem, lSchemaDestino: TJSONArray;
   lJsonOrigem, lJsonDestino: string;
+  lTask: ITask;
 begin
   fComparacao.AdicionarBarraDeProgresso(Progresso);
+  fComparacao.AdicionarRetornoDeRotina(FProcesso);
+  fComparacao.OnActionEscreveProcesso := HandleEscreveProcessoFinal;
+  fComparacao.OnActionEscreveProcessoAtual := HandleEscreveProcessoAtual;
+
   fComparacao.SetOrigemConexao(edServerOrigin.Text,
                                edPortOrigin.Text,
                                edDatabaseOrigin.Text,
@@ -104,10 +116,18 @@ begin
     mmResposta.Lines.Add('Schema "'+IfThen(lJsonOrigem = '[]', 'Origem', 'Destino')+'" não carregado');
     Exit;
   end;
-  if fComparacao.VerificarDiferencaEntreBancos(lJsonOrigem, lJsonDestino) then
-    ShowMessage('Concluido')
+  pcPrincipal.ActivePage := tsComparativo;
+  if fComparacao.VerificaVersaoEntreOsBancos then
+  begin
+    if fComparacao.VerificarDiferencaEntreBancos(lJsonOrigem, lJsonDestino) then
+      ShowMessage('Concluido')
+    else
+      ShowMessage('Não concluido');
+  end
   else
-    raise Exception.Create('Não concluido');
+  begin
+    mmComparativo.Lines.Add('Versões incompativeis');
+  end;
 end;
 
 procedure TfmMainCamparaBancos.btnExtrairMetadadosDestinoClick(Sender: TObject);
@@ -136,6 +156,13 @@ begin
     mmResposta.Lines.Add('Extraindo metadados da origem');
     mmResposta.Lines.Add(fComparacao.ExtrairMetadataOrigem);
   end;
+end;
+
+procedure TfmMainCamparaBancos.btnOrigemSequencesClick(Sender: TObject);
+var
+  lResposta: TResposta;
+begin
+  lResposta := fComparacao.RecalcularSequences;
 end;
 
 procedure TfmMainCamparaBancos.btnTesteDestClick(Sender: TObject);
@@ -172,6 +199,22 @@ end;
 procedure TfmMainCamparaBancos.FormDestroy(Sender: TObject);
 begin
   fComparacao.Free;
+end;
+
+procedure TfmMainCamparaBancos.FormResize(Sender: TObject);
+begin
+  gbOrigem.Width := tsGeral.Width div 2;
+  gbDestino.Width := tsGeral.Width div 2;
+end;
+
+procedure TfmMainCamparaBancos.HandleEscreveProcessoAtual(Sender: TObject);
+begin
+  mmComparativo.Lines.Add(FProcesso.GetProcessoAtual);
+end;
+
+procedure TfmMainCamparaBancos.HandleEscreveProcessoFinal(Sender: TObject);
+begin
+  mmComparativo.Lines.Add(FProcesso.GetProcesso);
 end;
 
 end.

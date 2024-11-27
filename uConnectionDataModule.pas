@@ -40,7 +40,8 @@ type
                     scDropTable,
                     scCreateTable,
                     scCreateIndice,
-                    scCreateSequence);
+                    scCreateSequence,
+                    scCheckVersao);
   TdmConexao = class(TDataModule)
     ConexaoOrigem: TFDConnection;
     ConexaoDestino: TFDConnection;
@@ -53,13 +54,15 @@ type
     FLog: string;
     procedure GravaLog(AText: string);
     function CreateContextField(AFieldName, ANotNull, ADefaultValue, AFieldLength,
-      AFieldPrecision, AFieldScale, AFieldType, AFieldSubType, ASegmentLength: string): string;
+      AFieldPrecision, AFieldScale, AFieldType, AFieldSubType, ASegmentLength, ACharSet: string): string;
     function VerificaElementoExiste(ASql: string): boolean;
     function ExecutaAcaoNoElemento(ASql: string): boolean;
+    function ExecutarCriacaoNoBanco(ASqlVerificacao, ASqlExecucao: string): TResposta;
     function ExecutarAlteracaoNoBanco(ASqlVerificacao, ASqlExecucao: string; AExecutarSeNaoExistir: boolean): TResposta; overload;
     function ExecutarAlteracaoNoBanco(ASqlVerificacao, ASqlExecucao, ASqlExclucaoCasoExista: string): TResposta; overload;
     function DropElement(ASqlVerificacao, ASqlExecucao: string): TResposta;
-    function CreateElement(ASqlVerificacao, ASqlExecucao: string; AExecutarSeNaoExistir: boolean): TResposta;
+    function CreateElement(ASqlVerificacao, ASqlExecucao: string; AExecutarSeNaoExistir: boolean): TResposta; overload;
+    function CreateElement(ASqlVerificacao, ASqlExecucao: string): TResposta; overload;
     function ForceCreateElement(ASqlVerificacao, ASqlExecucao, ASqlExclusaoCasoExista: string): TResposta; //Exclui o elemento se existir para forçar a criação
     function AlterElement(ASqlVerificacao, ASqlExecucao: string): TResposta;
   public
@@ -82,6 +85,7 @@ type
     function Execute(ASQL: string; AConexao: TFDConnection): boolean; overload;
     function Execute(ASQL: array of string; AConexao: TFDConnection): boolean; overload;
     function CloneFieldValues(ATableName, AFieldSource, AFieldDestination: string; AConexao: TFDConnection): boolean;
+    function RecalculateSequences(ATableName, AFieldName, ASequenceName: string): boolean;
 
     function GetScript(AIndex: TSqlCollection):string;
     function GetUltimoLog: string;
@@ -123,6 +127,11 @@ end;
 function TdmConexao.CreateElement(ASqlVerificacao, ASqlExecucao: string; AExecutarSeNaoExistir: boolean): TResposta;
 begin
   Result := ExecutarAlteracaoNoBanco(ASqlVerificacao, ASqlExecucao, AExecutarSeNaoExistir);
+end;
+
+function TdmConexao.CreateElement(ASqlVerificacao, ASqlExecucao: string): TResposta;
+begin
+  Result := ExecutarCriacaoNoBanco(ASqlVerificacao, ASqlExecucao);
 end;
 
 function TdmConexao.ForceCreateElement(ASqlVerificacao, ASqlExecucao, ASqlExclusaoCasoExista: string): TResposta;
@@ -179,6 +188,28 @@ begin
   begin
     Result.Codigo := 500;
     Result.Conteudo := GetUltimoLog;
+  end;
+end;
+
+function TdmConexao.ExecutarCriacaoNoBanco(ASqlVerificacao, ASqlExecucao: string): TResposta;
+begin
+  if not (VerificaElementoExiste(ASqlVerificacao)) then
+  begin
+    if ExecutaAcaoNoElemento(ASqlExecucao) then
+    begin
+      Result.Codigo := 200;
+      Result.Conteudo := 'Ok';
+    end
+    else
+    begin
+      Result.Codigo := 500;
+      Result.Conteudo := GetUltimoLog;
+    end;
+  end
+  else
+  begin
+    Result.Codigo := 200;
+    Result.Conteudo := 'Já criado';
   end;
 end;
 
@@ -291,7 +322,8 @@ begin
                          lFieldsJsonArray.Items[I].GetValue<string>('field_scale', ''),
                          lFieldsJsonArray.Items[I].GetValue<string>('field_type', ''),
                          lFieldsJsonArray.Items[I].GetValue<string>('field_sub_type', ''),
-                         lFieldsJsonArray.Items[I].GetValue<string>('segment_length', ''));
+                         lFieldsJsonArray.Items[I].GetValue<string>('segment_length', ''),
+                         lFieldsJsonArray.Items[I].GetValue<string>('field_charset', ''));
   end;
   lFieldsJsonArray.Free;
   lSqlCreateTable := GetScript(scCreateTable).Replace('$NOME', ATableName).Replace('$CAMPOS', lSqlPartFields);
@@ -312,7 +344,7 @@ begin
     .Replace('$TIPO', TTipoTriggers.ParseToString(ATriggerTipo))
     .Replace('$POSICAO', ATriggerPosition.ToString)
     .Replace('$CONTEUDO', aTriggerContext);
-  Result := AlterElement(lSqlConsultaTriggerExiste, lSqlCriarTrigger);
+  Result := CreateElement(lSqlConsultaTriggerExiste, lSqlCriarTrigger, True);
 end;
 
 function TdmConexao.CreateConstraint(AConstraintName, ATableName, AListFieldsLocalTable,
@@ -342,7 +374,7 @@ begin
 end;
 
 function TdmConexao.CreateContextField(AFieldName, ANotNull, ADefaultValue, AFieldLength,
-  AFieldPrecision, AFieldScale, AFieldType, AFieldSubType, ASegmentLength: string): string;
+  AFieldPrecision, AFieldScale, AFieldType, AFieldSubType, ASegmentLength, ACharSet: string): string;
 var
   lFieldSintaxe: string;
 begin
@@ -363,6 +395,8 @@ begin
    if (AFieldType = 'VARCHAR') or (AFieldType = 'CHAR') then
    begin
      lFieldSintaxe := lFieldSintaxe + '('+AFieldLength+')';
+     if not (ACharSet.IsEmpty) then
+      lFieldSintaxe := lFieldSintaxe + ' CHARACTER SET ' + ACharSet;
      if not (ADefaultValue.IsEmpty) then
        lFieldSintaxe := lFieldSintaxe + ' DEFAULT '+ QuotedStr(ADefaultValue);
    end
@@ -372,6 +406,8 @@ begin
      lFieldSintaxe := lFieldSintaxe + Format(' SUB_TYPE %s SEGMENT SIZE %s', [AFieldSubType, ASegmentLength]);
      if not (ADefaultValue.IsEmpty) then
        lFieldSintaxe := lFieldSintaxe + ' DEFAULT '+ QuotedStr(ADefaultValue);
+     if not (ACharSet.IsEmpty) then
+      lFieldSintaxe := lFieldSintaxe + ' CHARACTER SET ' + ACharSet;
    end
    else
    if (AFieldType = 'DECIMAL') or (AFieldType = 'NUMERIC') or (AFieldType = 'FLOAT') then
@@ -424,7 +460,7 @@ var
 begin
   lSqlConsultaSequenceExiste := GetScript(scSelectByNameSequence).Replace('$NOME', ASequenceName);
   lSqlCriarSequence := GetScript(scCreateSequence).Replace('$NOME', ASequenceName);
-  Result := CreateElement(lSqlConsultaSequenceExiste, lSqlCriarSequence, False);
+  Result := CreateElement(lSqlConsultaSequenceExiste, lSqlCriarSequence);
 end;
 
 function TdmConexao.AlterOrCreateFields(ATableName, AJsonField, AJsonCompleto: string): TResposta;
@@ -447,7 +483,8 @@ begin
                                          lFieldJson.GetValue<string>('field_scale', ''),
                                          lFieldJson.GetValue<string>('field_type', ''),
                                          lFieldJson.GetValue<string>('field_sub_type', ''),
-                                         lFieldJson.GetValue<string>('segment_length', ''));
+                                         lFieldJson.GetValue<string>('segment_length', ''),
+                                         lFieldJson.GetValue<string>('field_charset', ''));
   lFieldName := lFieldJson.GetValue<string>('field_name', '');
   lFieldNameTemp := lFieldName + '_TEMP';
   lFieldJson.Free;
@@ -746,6 +783,12 @@ end;
 function TdmConexao.OrigemConectado: boolean;
 begin
   Result := ConexaoOrigem.Connected;
+end;
+
+function TdmConexao.RecalculateSequences(ATableName, AFieldName,
+  ASequenceName: string): boolean;
+begin
+  executar aqui
 end;
 
 function TdmConexao.Select(AIndex: TSqlCollection; AConexao: TFDConnection): string;

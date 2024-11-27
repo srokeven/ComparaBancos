@@ -11,14 +11,26 @@ uses System.SysUtils, System.Classes, uConnectionDataModule, FireDAC.Stan.Intf, 
   FireDAC.Comp.ScriptCommands, FireDAC.Stan.Util, System.Json, System.StrUtils,
   Vcl.ComCtrls, VCL.Forms, System.Character, CamparaBancos.Resposta,
   ComparaBancos.BarraDeProgresso, ComparaBancos.Conexao,
-  ComparaBancos.TipoTriggers;
+  ComparaBancos.TipoTriggers, System.DateUtils;
 
 type
+  TProcesso = class
+    private
+      FTempoFinal, FTempoInicial: TDateTime;
+      FNomeProcesso: string;
+      function CalcularIntervaloDeTempo(Inicio, Fim: TDateTime): string;
+    public
+      procedure SetProcesso(ANomeProcesso: string);
+      function GetProcesso: string;
+      function GetProcessoAtual: string;
+  end;
   TCompareDatabase = class
   private
     FConexaoOrigem, FConexaoDestino: TConexao;
     FdmConexao: TdmConexao;
     FBarraDeProgresso: TBarraDeProgresso;
+    FProcesso: TProcesso;
+    FOnActionEscreveProcesso, FOnActionEscreveProcessoAtual: TNotifyEvent;
     //Utilitarios
     procedure SetValoresIniciaisProgresso(AMin, AMax: integer);
     procedure SetPosicao(APosicao: integer);
@@ -46,6 +58,8 @@ type
     function CompararTriggers(ATriggersOrigenJson, ATriggersDestinoJson: string): string;
     function CompararSequences(ASequencesOrigenJson, ASequencesDestinoJson: string): string;
     function AdicionaSeparador(AText: string): string;
+    procedure LerProcessoAtual(ATexto: string);
+    procedure EscreverProcessoFinal;
   public
     //Banco de origem
     procedure SetOrigemConexao(AServer, APort, ADatabase, AUsername, APassword: string);
@@ -56,9 +70,14 @@ type
     procedure SetDestinoConexao(AServer, APort, ADatabase, AUsername, APassword: string);
     function TestarDestino: TResposta;
     function ExtrairMetadataDestino: string;
+    function RecalcularSequences: TResposta;
 
+    function VerificaVersaoEntreOsBancos: boolean;
     function VerificarDiferencaEntreBancos(ASchemaOrigem, ASchemaDestino: string): boolean;
     procedure AdicionarBarraDeProgresso(var AProgressBar: TProgressBar);
+    procedure AdicionarRetornoDeRotina(var AProcesso: TProcesso);
+    property OnActionEscreveProcesso: TNotifyEvent read FOnActionEscreveProcesso write FOnActionEscreveProcesso;
+    property OnActionEscreveProcessoAtual: TNotifyEvent read FOnActionEscreveProcessoAtual write FOnActionEscreveProcessoAtual;
     constructor Create;
     destructor Destroy; override;
   end;
@@ -85,158 +104,211 @@ var
 begin
   //Reuqer fatoração, está muito verboso
   try
+    LerProcessoAtual('Aplicando alterações');
     lJsonDeAtaulizacao := TJSONObject.ParseJSONValue(AEstruturaOrganizadaJSON) as TJSONObject;
     if lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_sequences') <> nil then
+    begin
+      SetValoresIniciaisProgresso(0, lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_sequences').Count);
       for I := 0 to lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_sequences').Count - 1 do
       begin
+        SetPosicao(I+1);
         lJsonAtual :=  TJSONObject.ParseJSONValue(lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_sequences').Items[I].GetValue<TJSONObject>('objeto').ToJSON) as TJSONObject;
+        LerProcessoAtual('Excluindo sequences "'+lJsonAtual.GetValue<string>('sequence_name')+'"');
         lRespostaAtual := FdmConexao.DropSequence(lJsonAtual.GetValue<string>('sequence_name'), lJsonAtual.GetValue<string>('trigger_name'));
         case lRespostaAtual.Codigo of
           200: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('sequence_name')+' removido; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('sequence_name')+' removido; '+sLineBreak;
           end;
           204: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('sequence_name')+' não encontrado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('sequence_name')+' não encontrado; '+sLineBreak;
           end;
           400, 500: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('sequence_name')+' erro na remoção: '+lRespostaAtual.Conteudo+'; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('sequence_name')+' erro na remoção: '+lRespostaAtual.Conteudo+'; '+sLineBreak;
           end;
         end;
         lJsonAtual.Free;
+        EscreverProcessoFinal;
       end;
+    end;
     if lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_triggers') <> nil then
+    begin
+      SetValoresIniciaisProgresso(0, lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_triggers').Count);
       for I := 0 to lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_triggers').Count - 1 do
       begin
+        SetPosicao(I+1);
         lJsonAtual :=  TJSONObject.ParseJSONValue(lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_triggers').Items[I].GetValue<TJSONObject>('objeto').ToJSON) as TJSONObject;
+        LerProcessoAtual('Excluindo triggers "'+lJsonAtual.GetValue<string>('trigger_name')+'"');
         lRespostaAtual := FdmConexao.DropTrigger(lJsonAtual.GetValue<string>('trigger_name'));
         case lRespostaAtual.Codigo of
           200: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('trigger_name')+' removido; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('trigger_name')+' removido; '+sLineBreak;
           end;
           204: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('trigger_name')+' não encontrado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('trigger_name')+' não encontrado; '+sLineBreak;
           end;
           400, 500: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('trigger_name')+' erro na remoção: '+lRespostaAtual.Conteudo+'; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('trigger_name')+' erro na remoção: '+lRespostaAtual.Conteudo+'; '+sLineBreak;
           end;
         end;
         lJsonAtual.Free;
+        EscreverProcessoFinal;
       end;
+    end;
     if lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_indices') <> nil then
+    begin
+      SetValoresIniciaisProgresso(0, lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_indices').Count);
       for I := 0 to lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_indices').Count - 1 do
       begin
+        SetPosicao(I+1);
         lJsonAtual :=  TJSONObject.ParseJSONValue(lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_indices').Items[I].GetValue<TJSONObject>('objeto').ToJSON) as TJSONObject;
+        LerProcessoAtual('Excluindo indices "'+lJsonAtual.GetValue<string>('index_name')+'"');
         lRespostaAtual := FdmConexao.DropIndice(lJsonAtual.GetValue<string>('index_name'));
         case lRespostaAtual.Codigo of
           200: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('index_name')+' removido; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('index_name')+' removido; '+sLineBreak;
           end;
           204: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('index_name')+' não encontrado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('index_name')+' não encontrado; '+sLineBreak;
           end;
           400, 500: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('index_name')+' erro na remoção: '+lRespostaAtual.Conteudo+'; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('index_name')+' erro na remoção: '+lRespostaAtual.Conteudo+'; '+sLineBreak;
           end;
         end;
         lJsonAtual.Free;
+        EscreverProcessoFinal;
       end;
+    end;
     if lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_constraints') <> nil then
+    begin
+      SetValoresIniciaisProgresso(0, lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_constraints').Count);
       for I := 0 to lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_constraints').Count - 1 do
       begin
+        SetPosicao(I+1);
         lJsonAtual :=  TJSONObject.ParseJSONValue(lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_constraints').Items[I].GetValue<TJSONObject>('objeto').ToJSON) as TJSONObject;
+        LerProcessoAtual('Excluindo chaves(constraints) "'+lJsonAtual.GetValue<string>('constraint_name')+'"');
         lRespostaAtual := FdmConexao.DropConstraint(lJsonAtual.GetValue<string>('constraint_name'), lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_constraints').Items[I].GetValue<string>('tabela'));
         case lRespostaAtual.Codigo of
           200: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('constraint_name')+' removido; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('constraint_name')+' removido; '+sLineBreak;
           end;
           204: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('constraint_name')+' não encontrado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('constraint_name')+' não encontrado; '+sLineBreak;
           end;
           400, 500: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('constraint_name')+' erro na remoção: '+lRespostaAtual.Conteudo+'; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('constraint_name')+' erro na remoção: '+lRespostaAtual.Conteudo+'; '+sLineBreak;
           end;
         end;
         lJsonAtual.Free;
+        EscreverProcessoFinal;
       end;
+    end;
     if lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_fields') <> nil then
+    begin
+      SetValoresIniciaisProgresso(0, lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_fields').Count);
       for I := 0 to lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_fields').Count - 1 do
       begin
+        SetPosicao(I+1);
         lJsonAtual :=  TJSONObject.ParseJSONValue(lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_fields').Items[I].GetValue<TJSONObject>('objeto').ToJSON) as TJSONObject;
+        LerProcessoAtual('Excluindo campos "'+lJsonAtual.GetValue<string>('field_name')+'"');
         lRespostaAtual := FdmConexao.DropField(lJsonAtual.GetValue<string>('field_name'), lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_fields').Items[I].GetValue<string>('tabela'));
         case lRespostaAtual.Codigo of
           200: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('field_name')+' removido; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('field_name')+' removido; '+sLineBreak;
           end;
           204: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('field_name')+' não encontrado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('field_name')+' não encontrado; '+sLineBreak;
           end;
           400, 500: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('field_name')+' erro na remoção: '+lRespostaAtual.Conteudo+'; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('field_name')+' erro na remoção: '+lRespostaAtual.Conteudo+'; '+sLineBreak;
           end;
         end;
         lJsonAtual.Free;
+        EscreverProcessoFinal;
       end;
+    end;
     if lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_tables') <> nil then
+    begin
+      SetValoresIniciaisProgresso(0, lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_tables').Count);
       for I := 0 to lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_tables').Count - 1 do
       begin
+        SetPosicao(I+1);
         lJsonAtual :=  TJSONObject.ParseJSONValue(lJsonDeAtaulizacao.GetValue<TJSONArray>('drop_tables').Items[I].ToJSON) as TJSONObject;
+        LerProcessoAtual('Excluindo tabelas "'+lJsonAtual.GetValue<string>('tabela')+'"');
         lRespostaAtual := FdmConexao.DropTable(lJsonAtual.GetValue<string>('tabela'));
         case lRespostaAtual.Codigo of
           200: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' removido; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' removido; '+sLineBreak;
           end;
           204: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' não encontrado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' não encontrado; '+sLineBreak;
           end;
           400, 500: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' erro na remoção: '+lRespostaAtual.Conteudo+'; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' erro na remoção: '+lRespostaAtual.Conteudo+'; '+sLineBreak;
           end;
         end;
         lJsonAtual.Free;
+        EscreverProcessoFinal;
       end;
+    end;
     if lJsonDeAtaulizacao.GetValue<TJSONArray>('create_tables') <> nil then
+    begin
+      SetValoresIniciaisProgresso(0, lJsonDeAtaulizacao.GetValue<TJSONArray>('create_tables').Count);
       for I := 0 to lJsonDeAtaulizacao.GetValue<TJSONArray>('create_tables').Count - 1 do
       begin
+        SetPosicao(I+1);
         lJsonAtual :=  TJSONObject.ParseJSONValue(lJsonDeAtaulizacao.GetValue<TJSONArray>('create_tables').Items[I].ToJSON) as TJSONObject;
+        LerProcessoAtual('Criando tabela "'+lJsonAtual.GetValue<string>('tabela')+'"');
         lRespostaAtual := FdmConexao.CreateTable(lJsonAtual.GetValue<string>('tabela'), lJsonAtual.GetValue<TJSONObject>('alteracoes').GetValue<TJSONArray>('campos').ToJSON);
         case lRespostaAtual.Codigo of
           200: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' criada; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' criada; '+sLineBreak;
           end;
           204: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' não encontrado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' não encontrado; '+sLineBreak;
           end;
           400, 500: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' erro na cração: '+lRespostaAtual.Conteudo+'; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' erro na cração: '+lRespostaAtual.Conteudo+'; '+sLineBreak;
           end;
         end;
         lJsonAtual.Free;
+        EscreverProcessoFinal;
       end;
+    end;
     if lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_fields') <> nil then
+    begin
+      SetValoresIniciaisProgresso(0, lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_fields').Count);
       for I := 0 to lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_fields').Count - 1 do
-      begin
+      begin        SetPosicao(I+1);
         lJsonAtual :=  TJSONObject.ParseJSONValue(lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_fields').Items[I].ToJSON) as TJSONObject;
+        LerProcessoAtual('Alterando campo "'+lJsonAtual.GetValue<string>('tabela')+'.'+lJsonAtual.GetValue<TJSONObject>('objeto').GetValue<string>('field_name')+'"');
+
         lRespostaAtual := FdmConexao.AlterOrCreateFields(lJsonAtual.GetValue<string>('tabela'),
                                                          lJsonAtual.GetValue<TJSONObject>('objeto').ToJSON,
                                                          lJsonAtual.ToJSON);
         case lRespostaAtual.Codigo of
           200: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' atualizado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' atualizado; '+sLineBreak;
           end;
           204: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' não encontrado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' não encontrado; '+sLineBreak;
           end;
           400, 500: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' erro na atualização: '+lRespostaAtual.Conteudo+'; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('tabela')+' erro na atualização: '+lRespostaAtual.Conteudo+'; '+sLineBreak;
           end;
-          else lRetorno := lRetorno + ' Resultado do processo: '+lRespostaAtual.Conteudo+'; ';
+          else lRetorno := lRetorno + ' Resultado do processo: '+lRespostaAtual.Conteudo+'; '+sLineBreak;
         end;
         lJsonAtual.Free;
+        EscreverProcessoFinal;
       end;
+    end;
     if lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_constraints') <> nil then
+    begin
+      SetValoresIniciaisProgresso(0, lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_constraints').Count);
       for I := 0 to lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_constraints').Count - 1 do
       begin
+        SetPosicao(I+1);
         lJsonAtual :=  TJSONObject.ParseJSONValue(lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_constraints').Items[I].GetValue<TJSONObject>('objeto').ToJSON) as TJSONObject;
+        LerProcessoAtual('Alterando/Criando chave "'+lJsonAtual.GetValue<string>('constraint_name')+'"');
         lRespostaAtual := FdmConexao.CreateConstraint(lJsonAtual.GetValue<string>('constraint_name'),
                                                       lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_constraints').Items[I].GetValue<string>('tabela'),
                                                       lJsonAtual.GetValue<string>('field_name'),
@@ -245,21 +317,27 @@ begin
                                                       lJsonAtual.GetValue<string>('constraint_type'));
         case lRespostaAtual.Codigo of
           200: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('constraint_name')+' atualizado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('constraint_name')+' atualizado; '+sLineBreak;
           end;
           204: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('constraint_name')+' não encontrado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('constraint_name')+' não encontrado; '+sLineBreak;
           end;
           400, 500: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('constraint_name')+' erro na atualização: '+lRespostaAtual.Conteudo+'; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('constraint_name')+' erro na atualização: '+lRespostaAtual.Conteudo+'; '+sLineBreak;
           end;
         end;
         lJsonAtual.Free;
+        EscreverProcessoFinal;
       end;
+    end;
     if lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_indices') <> nil then
+    begin
+      SetValoresIniciaisProgresso(0, lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_indices').Count);
       for I := 0 to lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_indices').Count - 1 do
       begin
+        SetPosicao(I+1);
         lJsonAtual :=  TJSONObject.ParseJSONValue(lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_indices').Items[I].ToJSON) as TJSONObject;
+        LerProcessoAtual('Alterando/Criando indice "'+lJsonAtual.GetValue<string>('index_name')+'"');
         lRespostaAtual := FdmConexao.AlterOrCreateIndice(lJsonAtual.GetValue<string>('index_name'),
                                                          lJsonAtual.GetValue<string>('relation_name'),
                                                          lJsonAtual.GetValue<string>('expression_source'),
@@ -267,39 +345,51 @@ begin
                                                          lJsonAtual.GetValue<string>('index_type'));
         case lRespostaAtual.Codigo of
           200: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('index_name')+' atualizado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('index_name')+' atualizado; '+sLineBreak;
           end;
           204: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('index_name')+' não encontrado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('index_name')+' não encontrado; '+sLineBreak;
           end;
           400, 500: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('index_name')+' erro na atualização: '+lRespostaAtual.Conteudo+'; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('index_name')+' erro na atualização: '+lRespostaAtual.Conteudo+'; '+sLineBreak;
           end;
         end;
         lJsonAtual.Free;
+        EscreverProcessoFinal;
       end;
+    end;
     if lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_sequences') <> nil then
+    begin
+      SetValoresIniciaisProgresso(0, lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_sequences').Count);
       for I := 0 to lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_sequences').Count - 1 do
       begin
+        SetPosicao(I+1);
         lJsonAtual :=  TJSONObject.ParseJSONValue(lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_sequences').Items[I].GetValue<TJSONObject>('objeto').ToJSON) as TJSONObject;
+        LerProcessoAtual('Alterando/Criando sequence "'+lJsonAtual.GetValue<string>('sequence_name')+'"');
         lRespostaAtual := FdmConexao.AlterOrCreateSequence(lJsonAtual.GetValue<string>('sequence_name'));
         case lRespostaAtual.Codigo of
           200: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('sequence_name')+' atualizado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('sequence_name')+' atualizado; '+sLineBreak;
           end;
           204: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('sequence_name')+' não encontrado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('sequence_name')+' não encontrado; '+sLineBreak;
           end;
           400, 500: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('sequence_name')+' erro na atualização: '+lRespostaAtual.Conteudo+'; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('sequence_name')+' erro na atualização: '+lRespostaAtual.Conteudo+'; '+sLineBreak;
           end;
         end;
         lJsonAtual.Free;
+        EscreverProcessoFinal;
       end;
+    end;
     if lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_triggers') <> nil then
+    begin
+      SetValoresIniciaisProgresso(0, lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_triggers').Count);
       for I := 0 to lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_triggers').Count - 1 do
       begin
+        SetPosicao(I+1);
         lJsonAtual :=  TJSONObject.ParseJSONValue(lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_triggers').Items[I].GetValue<TJSONObject>('objeto').ToJSON) as TJSONObject;
+        LerProcessoAtual('Alterando/Criando trigger "'+lJsonAtual.GetValue<string>('trigger_name')+'"');
         lRespostaAtual := FdmConexao.CreateTrigger(lJsonDeAtaulizacao.GetValue<TJSONArray>('alter_triggers').Items[I].GetValue<string>('tabela'),
                                                    lJsonAtual.GetValue<string>('trigger_name'),
                                                    lJsonAtual.GetValue<string>('trigger_inactive') = '0',
@@ -308,17 +398,19 @@ begin
                                                    lJsonAtual.GetValue<string>('trigger_source'));
         case lRespostaAtual.Codigo of
           200: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('trigger_name')+' atualizado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('trigger_name')+' atualizado; '+sLineBreak;
           end;
           204: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('trigger_name')+' não encontrado; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('trigger_name')+' não encontrado; '+sLineBreak;
           end;
           400, 500: begin
-            lRetorno := lRetorno + lJsonAtual.GetValue<string>('trigger_name')+' erro na atualização: '+lRespostaAtual.Conteudo+'; ';
+            lRetorno := lRetorno + lJsonAtual.GetValue<string>('trigger_name')+' erro na atualização: '+lRespostaAtual.Conteudo+'; '+sLineBreak;
           end;
         end;
         lJsonAtual.Free;
+        EscreverProcessoFinal;
       end;
+    end;
     Result.Codigo := 200;
     Result.Conteudo := lRetorno;
   finally
@@ -361,7 +453,6 @@ function TCompareDatabase.CompararCampos(ACamposOrigenJson, ACamposDestinoJson,
 var
   lCamposComDiferencaEncontrada, lNovaListaDeCampos: string;
   lListaDeCamposComDiferenca, lListaDeCamposComDiferencaEDependencias: TJSONArray;
-
   lJsonArray, lDependenciaConstraint, lDependenciaIndices, lDependenciaTriggers: TJSONArray;
   lCampoComDiferenca: TJSONObject;
   lLista: TStringList;
@@ -539,6 +630,15 @@ begin
   Result := GetSequenceFromTrigger(UpperCase(ATrigger)) = UpperCase(AGeneretor);
 end;
 
+function TCompareDatabase.VerificaVersaoEntreOsBancos: boolean;
+var
+  lVersaoOrigem, lVersaoDestino: string;
+begin
+  lVersaoOrigem := FdmConexao.Select(scCheckVersao, FdmConexao.GetConexaoOrigem);
+  lVersaoDestino := FdmConexao.Select(scCheckVersao, FdmConexao.GetConexaoDestino);
+  Result := lVersaoOrigem = lVersaoDestino;
+end;
+
 function TCompareDatabase.CompararTabelas(ATabelaOrigenJson, ATabelaDestinoJson: string): string;
 var
   lTabelaOrigem, lTabelaDestino, lDiferencas: TJSONObject;
@@ -584,8 +684,6 @@ begin
   lResposta := ExecutaComparacao(ASchemaOrigem, ASchemaDestino);
   if lResposta.Codigo = 200 then
   begin
-    GravaArquivoLocal(lResposta.Conteudo, 'comparacao_'+FormatDateTime('hhnnss', now)+'_');
-    //Apllica diferencas
     tempEstruturaOrdenada := OrdenaEstruturaAtualizacao(lResposta.Conteudo);
     GravaArquivoLocal(tempEstruturaOrdenada, 'ordenado_'+FormatDateTime('hhnnss', now)+'_');
     lRespostaAplicarAtualizacao := AplicarAtualizacao(tempEstruturaOrdenada);
@@ -654,6 +752,21 @@ begin
   Result := FdmConexao.Select(ASqlIndex, AConexao);
 end;
 
+procedure TCompareDatabase.LerProcessoAtual(ATexto: string);
+begin
+  if Assigned(FProcesso) then
+    FProcesso.SetProcesso(ATexto);
+  if Assigned(FOnActionEscreveProcessoAtual) then
+    FOnActionEscreveProcessoAtual(nil);
+end;
+
+procedure TCompareDatabase.EscreverProcessoFinal;
+begin
+  if Assigned(FProcesso) then
+    if Assigned(FOnActionEscreveProcesso) then
+      FOnActionEscreveProcesso(nil);
+end;
+
 function TCompareDatabase.ExecutaComparacao(ASchemaOrigem,
   ASchemaDestino: string): TResposta;
 var
@@ -676,6 +789,7 @@ begin
       Exit;
     end;
     SetValoresIniciaisProgresso(0, lSchemaOrigem.Count);
+    LerProcessoAtual('Comparando tabelas');
     for I := 0 to lSchemaOrigem.Count -1 do
     begin
       SetPosicao(I+1);
@@ -728,6 +842,7 @@ begin
       Result.Codigo := 200;
       Result.Conteudo := lJsonParaExecucao.ToJSON;
     end;
+    EscreverProcessoFinal;
   finally
     lSchemaOrigem.Free;
     lSchemaDestino.Free;
@@ -762,6 +877,7 @@ begin
     lAlterConstraints := TJSONArray.Create;
     lAlterTriggers    := TJSONArray.Create;
     lAlterIndices     := TJSONArray.Create;
+    LerProcessoAtual('Ordenando alterações');
     for I := 0 to lAlteracoesDaEstrutura.Count - 1 do
     begin
       //Executar procedimentos na ordem para evitar conflitos
@@ -887,15 +1003,33 @@ begin
       .AddPair('alter_sequences', lAlterSequence)
       .AddPair('alter_triggers', lAlterTriggers);
      Result := lEstruturaOrganizada.ToJSON;
+    EscreverProcessoFinal;
   finally
     lEstruturaOrganizada.Free;
     lAlteracoesDaEstrutura.Free;
   end;
 end;
 
-function TCompareDatabase.ExtrairMetadataBanco(AConexao: TFDConnection): string;
+function TCompareDatabase.RecalcularSequences: TResposta;
 var
-  lJsonSchema: TJSONArray;
+  lSchemaDestino: TJSONArray;
+  I: Integer;
+begin
+  lSchemaDestino := TJSONObject.ParseJSONValue(ExtrairMetadataDestino) as TJSONArray;
+  try
+    for I := 0 to lSchemaDestino.Count - 1 do
+    begin
+      if lSchemaDestino.Items[I].GetValue<TJSONArray>('sequences') <> nil then
+      begin
+        FdmConexao.RecalculateSequences(ATableName, AFieldName, ASequenceName: string);
+      end;
+    end;
+  finally
+    lSchemaDestino.Free;
+  end;
+end;
+
+function TCompareDatabase.ExtrairMetadataBanco(AConexao: TFDConnection): string;
 begin
   Result := MontaMetadata(AConexao);
 end;
@@ -991,6 +1125,12 @@ begin
   end;
 end;
 
+procedure TCompareDatabase.AdicionarRetornoDeRotina(var AProcesso: TProcesso);
+begin
+  AProcesso := TProcesso.Create;
+  FProcesso := AProcesso;
+end;
+
 function TCompareDatabase.AdicionaSeparador(AText: string): string;
 begin
   Result := '|'+AText+'|';
@@ -1006,6 +1146,7 @@ var
   lReinicarLoop : boolean;
 begin
   lJsonSchemaCompleto := TJSONArray.Create;
+  LerProcessoAtual('Extraindo metadados do banco');
   try
     lTabelasStr := ExtrairElementosDoBanco(AConexao, scSelectTabelas);
     lTabelasJson := TJSONObject.ParseJSONValue(lTabelasStr) as TJSONArray;
@@ -1033,13 +1174,14 @@ begin
             .AddPair('controle', TJSONString.Create('T'+I.ToString+'C'+O.ToString))
             .AddPair('field_name', TJSONString.Create(lJsonResposta.Items[O].GetValue<string>('FIELD_NAME', '')))
             .AddPair('not_null', TJSONString.Create(lJsonResposta.Items[O].GetValue<string>('NOT_NULL', '')))
-            .AddPair('default_value', TJSONString.Create(lJsonResposta.Items[O].GetValue<string>('DEFAULT_VALUE', '')))
+            .AddPair('default_value', TJSONString.Create(lJsonResposta.Items[O].GetValue<string>('DEFAULT_VALUE', '').Replace('default ', '')))
             .AddPair('field_length', TJSONString.Create(lJsonResposta.Items[O].GetValue<string>('FIELD_LENGTH', '')))
             .AddPair('field_precision', TJSONString.Create(lJsonResposta.Items[O].GetValue<string>('FIELD_PRECISION', '')))
             .AddPair('field_scale', TJSONString.Create(lJsonResposta.Items[O].GetValue<string>('FIELD_SCALE', '')))
             .AddPair('field_type', TJSONString.Create(lJsonResposta.Items[O].GetValue<string>('FIELD_TYPE', '')))
             .AddPair('field_sub_type', TJSONString.Create(lJsonResposta.Items[O].GetValue<string>('FIELD_SUB_TYPE', '')))
             .AddPair('segment_length', TJSONString.Create(lJsonResposta.Items[O].GetValue<string>('SEGMENT_LENGTH', '')))
+            .AddPair('field_charset', TJSONString.Create(lJsonResposta.Items[O].GetValue<string>('FIELD_CHARSET', '')))
           );
         end;
         lJsonRespostaStr := '';
@@ -1140,6 +1282,7 @@ begin
   finally
     lJsonSchemaCompleto.Free;
   end;
+  EscreverProcessoFinal;
 end;
 
 procedure TCompareDatabase.SetPosicao(APosicao: integer);
@@ -1212,6 +1355,37 @@ begin
     Result.Codigo := 400;
     Result.Conteudo := FdmConexao.GetUltimoLog;
   end;
+end;
+
+{ TProcesso }
+
+function TProcesso.CalcularIntervaloDeTempo(Inicio, Fim: TDateTime): string;
+var
+  Intervalo: TTime;
+  Horas, Minutos, Segundos, Milissegundos: Word;
+begin
+  Intervalo := Fim - Inicio;
+  DecodeTime(Intervalo, Horas, Minutos, Segundos, Milissegundos);
+
+  Result := Format('%d Horas, %d Minutos, %d Segundos, %d Milissegundos',
+    [Horas, Minutos, Segundos, Milissegundos]);
+end;
+
+function TProcesso.GetProcesso: string;
+begin
+  FTempoFinal := Now;
+  Result := FNomeProcesso + ' - Tempo decorrido: ' +CalcularIntervaloDeTempo(FTempoInicial, FTempoFinal);
+end;
+
+function TProcesso.GetProcessoAtual: string;
+begin
+  Result := 'Processo atual: ' + FNomeProcesso;
+end;
+
+procedure TProcesso.SetProcesso(ANomeProcesso: string);
+begin
+  FTempoInicial := Now;
+  FNomeProcesso := ANomeProcesso;
 end;
 
 end.
